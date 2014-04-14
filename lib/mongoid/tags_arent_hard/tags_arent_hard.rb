@@ -10,6 +10,11 @@ module Mongoid
       def taggable_with(name, options = {})
         options = {separator: Mongoid::TagsArentHard.config.separator, _name: name}.merge(options)
         self.field(name, type: Mongoid::TagsArentHard::Tags, default: Mongoid::TagsArentHard::Tags.new([], options))
+
+        self.class.send(:define_method, "enable_#{name}_index!") do |*val|
+          @do_tags_index = true
+        end
+
         self.class_eval do
           define_method(name) do
             val = super()
@@ -28,7 +33,17 @@ module Mongoid
             super(val)
           end
 
+          index({name => 1})
+
+          # add callback to save indexes
+          after_save do |document|
+            document.class.send("save_#{name}_index!") if document.send("#{name}_changed?")
+          end
+
+          # enable indexing by default
+          self.send("enable_#{name}_index!")
         end
+
         self.class.send(:define_method, "with_#{name}") do |*val|
           self.send("with_any_#{name}", *val)
         end
@@ -48,6 +63,55 @@ module Mongoid
 
         self.class.send(:define_method, "without_any_#{name}") do |*val|
           not_in(name => Mongoid::TagsArentHard::Tags.new(*val, {}).tag_list)
+        end
+
+        self.class.send(:define_method, "#{name}_like") do |*val|
+          tags_index_collection.find(:_id => /#{val[0]}/).limit(val[1] || 10).sort(:_id => (val[2] || 1)).map{ |r| [r["_id"]] }
+        end
+
+        self.class.send(:define_method, "#{name}_with_weight") do |*val|
+          tags_index_collection.find.to_a.map{ |r| [r["_id"], r["value"]] }
+        end
+
+        self.class.send(:define_method, "tags_index_collection_name") do |*val|
+          "#{collection_name}_#{name}_index"
+        end
+
+        self.class.send(:define_method, "disable_#{name}_index!") do |*val|
+          @do_tags_index = false
+        end
+
+        self.class.send(:define_method, "tags_index_collection") do |*val|
+          @tags_index_collection ||= Moped::Collection.new(self.collection.database, tags_index_collection_name)
+        end
+
+        self.class.send(:define_method, "save_#{name}_index!") do |*val|
+          return unless @do_tags_index
+
+          map = "function() {
+            if (!this.#{name}) {
+              return;
+            }
+
+            for (index in this.#{name}) {
+              emit(this.#{name}[index], 1);
+            }
+          }"
+
+          reduce = "function(previous, current) {
+            var count = 0;
+
+            for (index in current) {
+              count += current[index]
+            }
+
+            return count;
+          }"
+
+          # Since map_reduce is normally lazy-executed, call 'raw'
+          # Should not be influenced by scoping. Let consumers worry about
+          # removing tags they wish not to appear in index.
+          self.unscoped.map_reduce(map, reduce).out(replace: tags_index_collection_name).raw
         end
       end
 
