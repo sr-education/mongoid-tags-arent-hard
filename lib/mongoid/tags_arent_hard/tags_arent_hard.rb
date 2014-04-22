@@ -39,9 +39,6 @@ module Mongoid
           after_save do |document|
             document.class.send("save_#{name}_index!") if document.send("#{name}_changed?")
           end
-
-          # enable indexing by default
-          self.send("enable_#{name}_index!")
         end
 
         self.class.send(:define_method, "with_#{name}") do |*val|
@@ -66,28 +63,22 @@ module Mongoid
         end
 
         self.class.send(:define_method, "#{name}_like") do |*val|
-          tags_index_collection.find(:_id => /#{val[0]}/).limit(val[1] || 10).sort(:_id => (val[2] || 1)).map{ |r| [r["_id"]] }
+          self.send("#{name}_index_collection").find(:_id => /#{val[0]}/).limit(val[1] || 10).sort(:_id => (val[2] || 1)).map{ |r| [r["_id"]] }
         end
 
         self.class.send(:define_method, "#{name}_with_weight") do |*val|
-          tags_index_collection.find.to_a.map{ |r| [r["_id"], r["value"]] }
+          self.send("#{name}_index_collection").find.to_a.map{ |r| [r["_id"], r["value"]] }
         end
 
-        self.class.send(:define_method, "tags_index_collection_name") do |*val|
+        self.class.send(:define_method, "#{name}_index_collection_name") do |*val|
           "#{collection_name}_#{name}_index"
         end
 
-        self.class.send(:define_method, "disable_#{name}_index!") do |*val|
-          @do_tags_index = false
-        end
-
-        self.class.send(:define_method, "tags_index_collection") do |*val|
-          @tags_index_collection ||= Moped::Collection.new(self.collection.database, tags_index_collection_name)
+        self.class.send(:define_method, "#{name}_index_collection") do |*val|
+          Moped::Collection.new(self.collection.database, self.send("#{name}_index_collection_name"))
         end
 
         self.class.send(:define_method, "save_#{name}_index!") do |*val|
-          return unless @do_tags_index
-
           map = "function() {
             if (!this.#{name}) {
               return;
@@ -111,7 +102,7 @@ module Mongoid
           # Since map_reduce is normally lazy-executed, call 'raw'
           # Should not be influenced by scoping. Let consumers worry about
           # removing tags they wish not to appear in index.
-          self.unscoped.map_reduce(map, reduce).out(replace: tags_index_collection_name).raw
+          self.unscoped.map_reduce(map, reduce).out(replace: self.send("#{name}_index_collection_name")).raw
         end
       end
 
