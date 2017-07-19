@@ -75,7 +75,7 @@ module Mongoid
         end
 
         self.class.send(:define_method, "#{name}_index_collection") do |*val|
-          Moped::Collection.new(self.collection.database, self.send("#{name}_index_collection_name"))
+          Mongo::Collection.new(self.collection.database, self.send("#{name}_index_collection_name"))
         end
 
         self.class.send(:define_method, "save_#{name}_index!") do |*val|
