@@ -63,7 +63,7 @@ module Mongoid
         end
 
         self.class.send(:define_method, "#{name}_like") do |*val|
-          self.send("#{name}_index_collection").find(:_id => /#{val[0]}/).limit(val[1] || 10).sort(:_id => (val[2] || 1)).map{ |r| [r["_id"]] }
+          self.send("#{name}_index_collection").find(:_id => /#{val[0]}/i).limit(val[1] || 10).sort(:_id => (val[2] || 1)).map{ |r| [r["_id"]] }
         end
 
         self.class.send(:define_method, "#{name}_with_weight") do |*val|
